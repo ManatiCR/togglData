@@ -60,7 +60,22 @@ def createWorkspace(workspace, mysqldb_connection):
 def createProject(project, mysqldb_connection):
     """This function create a single project"""
     cursor = mysqldb_connection.cursor()
-    
+    addProject = ("INSERT INTO project "
+                "(pid, wid, cid, name)"
+                "VALUES (%(pid)s, %(wid)s, %(cid)s, %(name)s)")
+    if  not 'cid' in project:
+        project['cid'] = 0
+
+
+    projectData = {
+    'pid': project['id'],
+    'wid': project['wid'],
+    'cid': project['cid'],
+    'name': project['name'],
+    }
+    cursor.execute(addProject, projectData)
+    mysqldb_connection.commit()
+    cursor.close()
 
 
 def createClient(client, mysqldb_connection):
