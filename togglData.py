@@ -75,6 +75,23 @@ def clientExist(clientId, mysqldb_connection):
             cursor.close()
             return False
 
+def userExist(userId, mysqldb_connection):
+    """Verify if a user exist"""
+    cursor = mysqldb_connection.cursor(dictionary=True)
+    query = ("SELECT uid FROM user "
+            "WHERE uid = %(uid)s")
+    queryData = {
+    'uid': userId
+    }
+    cursor.execute(query, queryData)
+    for row in cursor:
+        if row != '':
+            cursor.close()
+            return True
+        else:
+            cursor.close()
+            return False
+
 
 def createWorkspace(workspace, mysqldb_connection):
     """This function create a single workspace"""
@@ -92,6 +109,22 @@ def createWorkspace(workspace, mysqldb_connection):
         mysqldb_connection.commit()
         cursor.close()
 
+
+def createUser(user, mysqldb_connection):
+    """This function create a single user"""
+    cursor = mysqldb_connection.cursor(dictionary=True)
+    if not userExist(user['id'],mysqldb_connection):
+        addUser = ("INSERT INTO user "
+                        "(uid, default_wid, fullname)"
+                        "VALUES (%(uid)s, %(default_wid)s, %(fullname)s)")
+        userData = {
+        'uid': user['id'],
+        'default_wid': user['default_wid'],
+        'fullname': user['fullname'],
+        }
+        cursor.execute(addUser,userData)
+        mysqldb_connection.commit()
+        cursor.close()
 
 def createProject(project, mysqldb_connection):
     """This function create a single project"""
@@ -140,7 +173,10 @@ def createClient(client, mysqldb_connection):
 
 for workspace in workspaces:
     # Create a  workspace
+    print str(workspace['id']) + workspace['name']
     createWorkspace(workspace, mysqldb_connection)
+
+
 
 #create all the clients
 if 'clients' in response['data']:
@@ -154,6 +190,25 @@ if 'projects' in response['data']:
     for project in projects:
         createProject(project, mysqldb_connection)
 
-print response['data']['time_entries']
+for workspace in workspaces:
+    #get and create the workspace users
+    usersUrl = 'https://www.toggl.com/api/v8/workspaces/' + str(workspace['id']) + '/users'
+    usersResponse = requests.get(usersUrl, headers=headers)
+    if usersResponse.status_code == 200:
+        usersResponse = usersResponse.json()
+        for user in usersResponse:
+            print 'default_wid: ' + str(user['default_wid']) +  ' ' + user['fullname']
+            if not workspaceExist(user['default_wid'], mysqldb_connection):
+                newWorkspace = {
+                'id': user['default_wid'],
+                'name': user['fullname'] + ' workspace',
+                }
+                createWorkspace(newWorkspace, mysqldb_connection)
+            createUser(user, mysqldb_connection)
+    else:
+        print workspace['id']
+
+
+
 
 mysqldb_connection.close()
