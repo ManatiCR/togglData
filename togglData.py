@@ -2,17 +2,19 @@
 import requests
 import base64
 import mysql.connector as mysql
+import datetime
+import calendar
 import json
+
+#Initial year
+initialYear = 0
 
 #API KEY HERE
 string = ''+':api_token'
 headers = {'Authorization':'Basic '+base64.b64encode(string)}
+print base64.b64encode(string)
 url = 'https://www.toggl.com/api/v8/me?with_related_data=true'
-response = requests.get(url,headers=headers)
-if response.status_code != 200:
-    print "Login failed. Check your API key"
-    quit()
-response = response.json()
+
 
 mysqldb_config = {
    'user': 'root',
@@ -22,7 +24,40 @@ mysqldb_config = {
 }
 mysqldb_connection = mysql.connect(**mysqldb_config)
 
+
+def isInitialSynchronization(mysqldb_connection):
+    """Verify if is the initial Synchronization"""
+    cursor = mysqldb_connection.cursor(dictionary=True)
+    query = ("SELECT count(teid) as teid_count  FROM time_entry")
+    cursor.execute(query)
+    for row in cursor:
+        if row['teid_count'] != 0:
+            return False
+        else:
+            return True
+
+# Verify if is the First Synchronization to set the initial year.
+if isInitialSynchronization(mysqldb_connection):
+    flag = False
+    while not flag:
+        startYear = raw_input('Start year for your initial Synchronization: ')
+        try:
+            initialYear = int(startYear)
+            if len(str(initialYear)) == 4:
+                flag = True
+            else:
+                print 'The format of the year should be YYYY'
+        except ValueError:
+            print 'Re-enter the year value'
+
+#First request to toggl API
+response = requests.get(url,headers=headers)
+if response.status_code != 200:
+    print "Login failed. Check your API key"
+    quit()
+response = response.json()
 workspaces = response['data']['workspaces']
+
 
 def workspaceExist(workspacesId, mysqldb_connection):
     """Verify if a workspace exist"""
@@ -171,12 +206,48 @@ def createClient(client, mysqldb_connection):
         mysqldb_connection.commit()
         cursor.close()
 
+def createTimeEntry(timeEntry, mysqldb_connection):
+    """This function create a single TimeEntry"""
+    if not timeEntryExist(timeEntry['id'], mysqldb_connection):
+        cursor = mysqldb_connection.cursor()
+        addTimeEntry = ("INSERT INTO time_entry "
+                    "(teid, pid, uid, description, start_date, stop_date, duration, updated)"
+                    "VALUES (%(teid)s, %(pid)s, %(uid)s, %(description)s, %(start_date)s, %(stop_date)s, %(duration)s, %(updated)s)")
+        timeEntryData = {
+        'teid': timeEntry['id'],
+        'pid': timeEntry[''],
+        'uid': timeEntry[''],
+        'description': timeEntry[''],
+        'start_date': timeEntry[''],
+        'stop_date': timeEntry[''],
+        'duration': timeEntry[''],
+        'updated': timeEntry[''],
+        }
+        cursor.execute(addTimeEntry, timeEntryData)
+        mysqldb_connection.commit()
+        cursor.close()
+
+def initialSynchronization(headers, mysqldb_connection, workspaces, initialYear):
+    """Get all the time entries in intervals of one years"""
+    startYear = '01/01/' + str(initialYear)
+    date = datetime.datetime.strptime(startYear, "%d/%m/%Y")
+    startTimeStamp = calendar.timegm(date.utctimetuple())
+    segYear = 31536000
+    #@TODO un while que de los rangos de los reportes  y que cuanto el
+    #nexttimestamp sea mayor que el actual timestamp se asigne el timestamp
+    # actual como el ultimo rango
+
+
+
+    print date;
+
+
+
+
+
 for workspace in workspaces:
     # Create a  workspace
-    print str(workspace['id']) + workspace['name']
     createWorkspace(workspace, mysqldb_connection)
-
-
 
 #create all the clients
 if 'clients' in response['data']:
@@ -197,7 +268,6 @@ for workspace in workspaces:
     if usersResponse.status_code == 200:
         usersResponse = usersResponse.json()
         for user in usersResponse:
-            print 'default_wid: ' + str(user['default_wid']) +  ' ' + user['fullname']
             if not workspaceExist(user['default_wid'], mysqldb_connection):
                 newWorkspace = {
                 'id': user['default_wid'],
@@ -205,10 +275,9 @@ for workspace in workspaces:
                 }
                 createWorkspace(newWorkspace, mysqldb_connection)
             createUser(user, mysqldb_connection)
-    else:
-        print workspace['id']
 
-
-
-
+if initialYear != 0:
+    initialSynchronization(headers, mysqldb_connection, workspaces, initialYear)
+else:
+    print "is not a initialSynchronization"
 mysqldb_connection.close()
