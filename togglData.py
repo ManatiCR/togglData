@@ -3,7 +3,6 @@ import requests
 import base64
 import mysql.connector as mysql
 import datetime
-import calendar
 import json
 
 #Initial year
@@ -229,21 +228,35 @@ def createTimeEntry(timeEntry, mysqldb_connection):
 
 def initialSynchronization(headers, mysqldb_connection, workspaces, initialYear):
     """Get all the time entries in intervals of one years"""
-    startYear = '01/01/' + str(initialYear)
-    date = datetime.datetime.strptime(startYear, "%d/%m/%Y")
-    startTimeStamp = calendar.timegm(date.utctimetuple())
-    segYear = 31536000
-    #@TODO un while que de los rangos de los reportes  y que cuanto el
-    #nexttimestamp sea mayor que el actual timestamp se asigne el timestamp
-    # actual como el ultimo rango
+    nextYear = initialYear
+    now = datetime.datetime.now()
+    actualYear = now.year
+    for workspace in workspaces:
+        while actualYear + 1 <= nextYear:
+            startYear = nextYear
+            nextYear = nextYear + 1
+            totalPages = 0
+            actualPage = 1
+            url = 'https://www.toggl.com/reports/api/v2/details?user_agent=testing&workspace_id=' + str(workspace['id']) + '&since=' + str(startYear)+ '-01-01&until=' + nextYear + '-01-01&page=1'
+            response = requests.get(url,headers=headers)
+            response = response.json()
+            totalpages = int(response['total_count']) / int(response['per_page'])
+            if int(response['total_count']) % int(response['per_page']) != 0:
+                totalPages = totalPages + 1
+            timeEntriesProcesor(response['data'])
+            while actualPage <= totalPages:
+                actualPage = actualPage + 1
+                url = 'https://www.toggl.com/reports/api/v2/details?user_agent=testing&workspace_id=' + str(workspace['id']) + '&since=' + str(startYear)+ '-01-01&until=' + str(nextYear) + '-01-01&page=' + str(actualPage)
+                response = requests.get(url,headers=headers)
+                response = response.json()
+                timeEntriesProcesor(response['data'])
 
+#@TODO probar algorimo, si es posible optimizarlo
 
-
-    print date;
-
-
-
-
+def timeEntriesProcesor(mysqldb_connection, timeEntries):
+    "Helper to save all the time entries"
+    for timeEntry in timeEntries:
+        createTimeEntry(mysqldb_connection, timeEntry)
 
 for workspace in workspaces:
     # Create a  workspace
