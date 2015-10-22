@@ -31,7 +31,7 @@ CREATE  TABLE user (
 
 CREATE TABLE time_entry (
   teid int unsigned NOT NULL,
-  pid int unsigned NOT NULL,
+  pid int unsigned ,
   uid int unsigned NOT NULL,
   description LONGTEXT,
   start_date DATETIME NOT NULL,
@@ -41,4 +41,19 @@ CREATE TABLE time_entry (
   PRIMARY KEY (teid),
   FOREIGN KEY (uid) REFERENCES user(uid),
   FOREIGN KEY (pid) REFERENCES project(pid)
+);
+
+CREATE TABLE tag (
+  tid int unsigned NOT NULL AUTO_INCREMENT,
+  name varchar(255) NOT NULL,
+  PRIMARY KEY (tid)
+);
+
+CREATE TABLE time_entry_tag (
+  id int unsigned NOT NULL AUTO_INCREMENT,
+  teid int unsigned NOT NULL,
+  tid int unsigned NOT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (teid) REFERENCES time_entry(teid),
+  FOREIGN KEY (tid) REFERENCES tag(tid)
 );
