@@ -2,8 +2,10 @@
 import requests
 import base64
 import mysql.connector as mysql
+from datetime import datetime
 import datetime
 import json
+import dateutil.parser
 
 #Initial year
 initialYear = 0
@@ -189,6 +191,37 @@ def createProject(project, mysqldb_connection):
         cursor.close()
 
 
+
+def createTag(tag, mysqldb_connection):
+    "create a single tag"
+    cursor = mysqldb_connection.cursor()
+    query = ("INSERT INTO tag "
+            "(tid, name) VALUES(%(name)s)")
+    queryValues = {
+    'name': tag
+    }
+    cursor.execute(query, queryValues)
+    mysqldb_connection.commit()
+    newTagId = cursor.insert_id()
+    cursor.close()
+    return newTagId
+
+
+def getTagbyName(tagName, mysqldb_connection):
+    "get a single tag by name"
+    cursor = mysqldb_connection.cursor()
+    query = ("SELECT tid FROM tag WHERE name LIKE %(name)s")
+    queryData = {
+    'name': tagName
+    }
+    cursor.execute(query, queryData)
+    row = cursor.fetchone()
+    if row is not None:
+        return row['id']
+    else:
+        return False
+
+
 def createClient(client, mysqldb_connection):
     """This function create a single client"""
     if not clientExist(client['id'], mysqldb_connection):
@@ -222,6 +255,42 @@ def timeEntryExist(timeEntryId, mysqldb_connection):
             cursor.close()
             return False
 
+def timeEntryUpdated(timeEntry, mysqldb_connection):
+    """Verify if an time entry is up to date"""
+    cursor = mysqldb_connection.cursor(dictionary=True)
+    query = ("SELECT updated FROM time_entry "
+            "WHERE teid = %(teid)s")
+    queryData = {
+    'teid': timeEntry['id']
+    }
+    cursor.execute(query, queryData)
+    row = cursor.fetchone()
+    if row is not None:
+        if row['updated'] != dateutil.parser.parse(timeEntry['updated'],  ignoretz=True):
+            cursor.close()
+            return True
+    cursor.close()
+    return False
+
+def updateTimeEntry(timeEntry, mysqldb_connection):
+    """Update a specific timeEntry"""
+    cursor = mysqldb_connection.cursor()
+    query = ("UPDATE time_entry "
+            "SET description=%(description)s, pid=%(pid)s, start_date=%(start_date)s, stop_date=%(stop_date)s, duration=%(duration)s, updated=%(updated)s "
+            "WHERE teid=%(teid)s")
+    queryData = {
+    'teid': timeEntry['id'],
+    'pid': timeEntry['pid'],
+    'description': timeEntry['description'],
+    'start_date': timeEntry['start'],
+    'stop_date': timeEntry['end'],
+    'duration': timeEntry['dur'],
+    'updated': timeEntry['updated'],
+    }
+    cursor.execute(query, queryData)
+    mysqldb_connection.commit()
+    cursor.close()
+
 
 def createTimeEntry(timeEntry, mysqldb_connection):
     """This function create a single TimeEntry"""
@@ -230,66 +299,95 @@ def createTimeEntry(timeEntry, mysqldb_connection):
         addTimeEntry = ("INSERT INTO time_entry "
                     "(teid, pid, uid, description, start_date, stop_date, duration, updated)"
                     "VALUES (%(teid)s, %(pid)s, %(uid)s, %(description)s, %(start_date)s, %(stop_date)s, %(duration)s, %(updated)s)")
-        print timeEntry['pid']
-        if  timeEntry['pid'] == 'None':
-            if not projectExist(0, mysqldb_connection):
-                project = {
-                'name': 'No project',
-                'id': 0,
-                'wid': 333257,
-                'cid': 0
-                }
-                #create the 0 client if not exist
-                createProject(project, mysqldb_connection)
-            timeEntry['pid'] = 0
 
-        timeEntryData = {
-        'teid': timeEntry['id'],
-        'pid': timeEntry['pid'],
-        'uid': timeEntry['uid'],
-        'description': timeEntry['description'],
-        'start_date': timeEntry['start'],
-        'stop_date': timeEntry['end'],
-        'duration': timeEntry['dur'],
-        'updated': timeEntry['updated'],
-        }
-        cursor.execute(addTimeEntry, timeEntryData)
-        mysqldb_connection.commit()
-        cursor.close()
+        if  str(timeEntry['pid']) != 'None' and not projectExist(timeEntry['pid'], mysqldb_connection):
+            response = requests.get('https://www.toggl.com/api/v8/projects/' + str(timeEntry['pid']),headers=headers)
+            if response.status_code == 200:
+                response = response.json()
+                createProject(response['data'], mysqldb_connection)
+            else:
+                print str(response.status_code) + ' status'
+
+        if str(timeEntry['end']) != 'None' and str(timeEntry['start']) != 'None':
+            if  userExist(timeEntry['uid'], mysqldb_connection):
+                if str(timeEntry['tags']) != '':
+                    print timeEntry['tags']
+                else:
+                    print 'no tag'
+                timeEntryData = {
+                'teid': timeEntry['id'],
+                'pid': timeEntry['pid'],
+                'uid': timeEntry['uid'],
+                'description': timeEntry['description'],
+                'start_date': timeEntry['start'],
+                'stop_date': timeEntry['end'],
+                'duration': timeEntry['dur'],
+                'updated': timeEntry['updated'],
+                }
+                cursor.execute(addTimeEntry, timeEntryData)
+                mysqldb_connection.commit()
+                cursor.close()
+            else:
+                print 'Ignnore time Entry from: ' +  timeEntry['user']
+        else:
+            print 'No stop or start date not defined'
+    else:
+        if timeEntryUpdated(timeEntry, mysqldb_connection):
+            updateTimeEntry(timeEntry, mysqldb_connection)
 
 def initialSynchronization(headers, mysqldb_connection, workspaces, initialYear):
     """Get all the time entries in intervals of one years"""
-    nextYear = initialYear
     now = datetime.datetime.now()
     actualYear = now.year
-
     for workspace in workspaces:
         print str(workspace['id']) + ' Workspace'
+        nextYear = initialYear
         while actualYear + 1 >= nextYear:
             startYear = nextYear
             nextYear = nextYear + 1
             totalPages = 0
             actualPage = 1
-            url = 'https://www.toggl.com/reports/api/v2/details?user_agent=testing&workspace_id=' + str(workspace['id']) + '&since=' + str(startYear) + '-01-01&until=' + str(nextYear) + '-01-01&page=1'
+            url = 'https://www.toggl.com/reports/api/v2/details?user_agent=toggleData&workspace_id=' + str(workspace['id']) + '&since=' + str(startYear) + '-01-01&until=' + str(nextYear) + '-01-01&page=1'
             response = requests.get(url,headers=headers)
             response = response.json()
-            totalpages = int(response['total_count']) / int(response['per_page'])
+            totalPages = int(response['total_count']) / int(response['per_page'])
+
             if int(response['total_count']) % int(response['per_page']) != 0:
                 totalPages = totalPages + 1
             timeEntriesProcesor(mysqldb_connection, response['data'])
+
             while actualPage <= totalPages:
                 actualPage = actualPage + 1
-                url = 'https://www.toggl.com/reports/api/v2/details?user_agent=testing&workspace_id=' + str(workspace['id']) + '&since=' + str(startYear)+ '-01-01&until=' + str(nextYear) + '-01-01&page=' + str(actualPage)
+                url = 'https://www.toggl.com/reports/api/v2/details?user_agent=toggleData&workspace_id=' + str(workspace['id']) + '&since=' + str(startYear)+ '-01-01&until=' + str(nextYear) + '-01-01&page=' + str(actualPage)
                 response = requests.get(url,headers=headers)
                 response = response.json()
                 timeEntriesProcesor(mysqldb_connection, response['data'])
 
-#@TODO probar algorimo, si es posible optimizarlo
-
 def timeEntriesProcesor(mysqldb_connection, timeEntries):
-    "Helper to save all the time entries"
+    """Helper to save all the time entries"""
     for timeEntry in timeEntries:
         createTimeEntry(timeEntry, mysqldb_connection)
+
+def continuousSynchronization(headers, mysqldb_connection, workspaces):
+    """Handles the continuous Synchronization process"""
+    for workspace in workspaces:
+        totalPages = 0
+        actualPage = 1
+        url = 'https://www.toggl.com/reports/api/v2/details?user_agent=toggleData&workspace_id=' + str(workspace['id'])
+        response = requests.get(url,headers=headers)
+        response = response.json()
+        totalPages = int(response['total_count']) / int(response['per_page'])
+
+        if int(response['total_count']) % int(response['per_page']) != 0:
+            totalPages = totalPages + 1
+        timeEntriesProcesor(mysqldb_connection, response['data'])
+
+        while actualPage <= totalPages:
+            actualPage = actualPage + 1
+            url = 'https://www.toggl.com/reports/api/v2/details?user_agent=toggleData&workspace_id=' + str(workspace['id']) + '&page=' + str(actualPage)
+            response = requests.get(url,headers=headers)
+            response = response.json()
+            timeEntriesProcesor(mysqldb_connection, response['data'])
 
 for workspace in workspaces:
     # Create a  workspace
@@ -321,9 +419,34 @@ for workspace in workspaces:
                 }
                 createWorkspace(newWorkspace, mysqldb_connection)
             createUser(user, mysqldb_connection)
+    else:
+        if usersResponse.status_code == 403:
+            usersUrl = 'https://www.toggl.com/api/v8/workspaces/' + str(workspace['id']) + '/workspace_users'
+            usersResponse = requests.get(usersUrl, headers=headers)
+            if usersResponse.status_code == 200:
+                usersResponse = usersResponse.json()
+                for user in usersResponse:
+                    if user['admin'] == True and not workspaceExist(user['wid'], mysqldb_connection):
+                        newWorkspace = {
+                        'id': user['wid'],
+                        'name': user['name'] + ' workspace',
+                        }
+                        createWorkspace(newWorkspace, mysqldb_connection)
+                    print 'user in exception ' + user['name']
+                    newUser = {
+                    'id': user['uid'],
+                    'default_wid': user['wid'],
+                    'fullname': user['name'],
+                    }
+                    createUser(newUser, mysqldb_connection)
 
-#if initialYear != 0:
-initialSynchronization(headers, mysqldb_connection, workspaces, initialYear)
-#else:
-    #print "is not a initialSynchronization"
+
+
+if isInitialSynchronization(mysqldb_connection):
+    initialSynchronization(headers, mysqldb_connection, workspaces, initialYear)
+else:
+    continuousSynchronization(headers, mysqldb_connection, workspaces)
 mysqldb_connection.close()
+
+#close the execution of script
+exit()
