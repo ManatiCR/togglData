@@ -192,32 +192,61 @@ def createProject(project, mysqldb_connection):
 
 
 
+def existTimeEntryTag(timeEntryId, tagId, mysqldb_connection):
+    """Verify if one time entry is associated with specific tag"""
+    cursor = mysqldb_connection.cursor(dictionary=True)
+    query = ("SELECT id FROM time_entry_tag WHERE teid=%(teid)s and tid=%(tid)s")
+    queryData = {
+    'teid': timeEntryId,
+    'tid': tagId
+    }
+    cursor.execute(query, queryData)
+    row = cursor.fetchone()
+    if row is not None and row != '' :
+        return row['id']
+    else:
+        return False
+
+
+
+
+def createTimeEntryTag(timeEntryTag, mysqldb_connection):
+    """Create the association between a time entry and one tag"""
+    if not existTimeEntryTag(timeEntryId = timeEntryTag['teid'], tagId = timeEntryTag['tid'], mysqldb_connection= mysqldb_connection):
+        cursor =  mysqldb_connection.cursor()
+        query = ("INSERT INTO time_entry_tag (teid, tid) "
+                 "VALUES(%(teid)s, %(tid)s)")
+        cursor.execute(query, timeEntryTag)
+        mysqldb_connection.commit()
+        cursor.close()
+
+
 def createTag(tag, mysqldb_connection):
     "create a single tag"
     cursor = mysqldb_connection.cursor()
     query = ("INSERT INTO tag "
-            "(tid, name) VALUES(%(name)s)")
+            "(name) VALUES(%(name)s)")
     queryValues = {
     'name': tag
     }
     cursor.execute(query, queryValues)
+    newTagId = cursor.lastrowid
     mysqldb_connection.commit()
-    newTagId = cursor.insert_id()
     cursor.close()
     return newTagId
 
 
 def getTagbyName(tagName, mysqldb_connection):
     "get a single tag by name"
-    cursor = mysqldb_connection.cursor()
+    cursor = mysqldb_connection.cursor(dictionary=True)
     query = ("SELECT tid FROM tag WHERE name LIKE %(name)s")
     queryData = {
     'name': tagName
     }
     cursor.execute(query, queryData)
     row = cursor.fetchone()
-    if row is not None:
-        return row['id']
+    if row is not None and row != '' :
+        return row['tid']
     else:
         return False
 
@@ -310,10 +339,16 @@ def createTimeEntry(timeEntry, mysqldb_connection):
 
         if str(timeEntry['end']) != 'None' and str(timeEntry['start']) != 'None':
             if  userExist(timeEntry['uid'], mysqldb_connection):
-                if str(timeEntry['tags']) != '':
-                    print timeEntry['tags']
-                else:
-                    print 'no tag'
+                tagsIds = []
+                if timeEntry['tags']:
+                    for tag in timeEntry['tags']:
+                        tagId = getTagbyName(str(tag), mysqldb_connection)
+                        if tagId:
+                            tagsIds.append(tagId)
+                        else:
+                            newTagId = createTag(tag=tag, mysqldb_connection=mysqldb_connection)
+                            tagsIds.append(newTagId)
+
                 timeEntryData = {
                 'teid': timeEntry['id'],
                 'pid': timeEntry['pid'],
@@ -327,10 +362,19 @@ def createTimeEntry(timeEntry, mysqldb_connection):
                 cursor.execute(addTimeEntry, timeEntryData)
                 mysqldb_connection.commit()
                 cursor.close()
+
+                # Create the association between time entries and tags
+                if tagsIds:
+                    for tid in tagsIds:
+                        timeEntrytag = {
+                        'teid': timeEntry['id'],
+                        'tid': tid
+                        }
+                        createTimeEntryTag(timeEntryTag = timeEntrytag, mysqldb_connection = mysqldb_connection)
             else:
-                print 'Ignnore time Entry from: ' +  timeEntry['user']
+                print 'Ignored time Entry: user ' +  timeEntry['user']
         else:
-            print 'No stop or start date not defined'
+            print 'No stop or start date defined'
     else:
         if timeEntryUpdated(timeEntry, mysqldb_connection):
             updateTimeEntry(timeEntry, mysqldb_connection)
